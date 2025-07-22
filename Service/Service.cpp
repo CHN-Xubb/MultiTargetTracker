@@ -6,30 +6,18 @@
 #include <QDir>
 #include "LogManager.h"
 
-
-// 用于捕获系统信号的静态函数
-void handleSignal(int signal)
+Service::Service(int argc, char **argv)
+    : QtService<QCoreApplication>(argc, argv, "MultiTargetTrackerService"),
+      m_worker(nullptr),
+      m_isServiceRunning(false)
 {
-    if (signal == SIGINT || signal == SIGTERM) {
-        // 触发Qt应用的退出流程
-        QCoreApplication::quit();
-    }
-}
+    // 设置服务的描述信息
+    setServiceDescription("MultiTargetTrackerService");
+    // 设置服务的启动类型
+    // QtServiceController::AutoStartup: 系统启动时自动运行 (最常用)
+    // QtServiceController::ManualStartup: 手动启动
+    setStartupType(QtServiceController::AutoStartup);
 
-Service::Service(QObject *parent) : QObject(parent), m_worker(nullptr)
-{
-    initLogging();
-    initConfig();
-    initWorkerThread();
-
-    m_healthCheckServer = new HealthCheckServer(this, this);
-
-    // 连接应用的退出信号到服务的stop槽，实现优雅退出
-    connect(qApp, &QCoreApplication::aboutToQuit, this, &Service::stop);
-
-    // 注册信号处理器
-    signal(SIGINT, handleSignal);  // Ctrl+C
-    signal(SIGTERM, handleSignal); // kill 命令
 }
 
 Service::~Service()
@@ -41,14 +29,21 @@ Service::~Service()
     }
 }
 
-Worker* Service::getWorker() const
+QDateTime Service::getLastWorkerHeartbeat() const
 {
-    return m_worker;
+    QMutexLocker locker(&m_heartbeatMutex);
+    return m_lastWorkerHeartbeat;
 }
 
 bool Service::isWorkerThreadRunning() const
 {
-    return m_workerThread.isRunning();
+    return m_isServiceRunning && m_workerThread.isRunning();
+}
+
+void Service::onWorkerHeartbeat(const QDateTime &lastHeartbeat)
+{
+    QMutexLocker locker(&m_heartbeatMutex);
+    m_lastWorkerHeartbeat = lastHeartbeat;
 }
 
 void Service::initConfig()
@@ -86,24 +81,18 @@ void Service::initConfig()
 
 void Service::initLogging()
 {
-    // --- 安装和配置日志管理器 ---
-    // 1. 安装日志管理器（必须在所有日志调用之前）
     LogManager::instance().install();
-
-    // 2. (可选) 自定义配置
-    // 为了方便测试，我们将文件大小限制为 5MB，文件数量为 3
     LogManager::instance().setMaxFileSize(5*1024*1024); // 5 MB
     LogManager::instance().setMaxFileCount(3);
-    // LogManager::instance().setLogDirectory("C:/my_app_logs"); // 也可以指定一个绝对路径
-    // qFatal("这是一个致命错误，应用程序将终止。"); // 取消注释会使程序中止
-
-    qInfo()<<"================ 服务启动中 ================";
 }
 
 void Service::initWorkerThread()
 {
     m_worker = new Worker();
     m_worker->moveToThread(&m_workerThread);
+
+    //心跳检查
+    QObject::connect(m_worker, &Worker::heartbeat, this, &Service::onWorkerHeartbeat);
 
     // 当线程启动时，开始执行Worker的doWork
     connect(&m_workerThread, &QThread::started, m_worker, &Worker::doWork);
@@ -114,32 +103,94 @@ void Service::initWorkerThread()
 
 void Service::start()
 {
-    qInfo()<<"正在启动服务...";
-    m_workerThread.start();
+    QCoreApplication *app = application();
+    app->setApplicationVersion("V1.0");
 
-    QSettings settings("Server.ini", QSettings::IniFormat);
-    quint16 port = settings.value("HealthCheck/port", 8899).toUInt();
-    if (!m_healthCheckServer->startListen(port)) {
-        qCritical() << "健康检查服务器启动失败，端口号" << port;
-    } else {
-        qInfo() << "健康检查服务器正在监听端口" << port;
+    initLogging();
+
+    if (QDir::setCurrent(QCoreApplication::applicationDirPath()))
+    {
+        qInfo() << "已将工作目录设置为:" << QCoreApplication::applicationDirPath();
+    }
+    else
+    {
+        qCritical() << "错误：无法将工作目录设置为应用程序目录！";
+        return;
     }
 
-    qInfo()<<"服务启动成功。";
+    initConfig();
+
+    qInfo() << "================ 服务启动中 ================";
+
+    try {
+
+        // 1. 初始化工作线程
+        initWorkerThread();
+
+        // 2. 初始化并启动健康检查服务器
+        m_healthCheckServer = new HealthCheckServer(this, this);
+        QString configPath = QCoreApplication::applicationDirPath() + "/Server.ini";
+        QSettings settings(configPath, QSettings::IniFormat);
+
+        quint16 port = settings.value("HealthCheck/port", 8899).toUInt();
+
+        if (!m_healthCheckServer->startListen(port))
+        {
+            qCritical() << "健康检查服务器启动失败，端口号" << port;
+            return;
+        }
+
+        qInfo() << "健康检查服务器正在监听端口" << port;
+
+        // 3. 启动工作线程
+        m_workerThread.start();
+
+        m_isServiceRunning = true;
+
+        qInfo() << "================ 服务启动成功 ================";
+
+        return;
+    }
+    catch (const std::exception& e)
+    {
+        qCritical() << "服务启动时发生严重错误: " << e.what();
+        return ;
+    }
+    catch (...)
+    {
+        qCritical() << "服务启动时发生未知的严重错误。";
+        return;
+    }
 }
 
 void Service::stop()
 {
-    qInfo()<<"正在停止服务...";
+    qInfo() << "================ 正在停止服务 ================";
 
-    m_healthCheckServer->stopListen();
-
-    // 如果线程正在运行，则请求停止
-    if (m_workerThread.isRunning()) {
-        // 调用Worker的stopWork槽来安全停止
-        QMetaObject::invokeMethod(m_worker, "stopWork", Qt::QueuedConnection);
-        // 等待线程处理完所有事件并退出
-        m_workerThread.wait(5000); // 等待最多5秒
+    // 停止健康检查服务器
+    if (m_healthCheckServer)
+    {
+        m_healthCheckServer->stopListen();
     }
-    qInfo()<<"================ 服务已停止 ================";
+
+    // 停止工作线程
+    if (m_workerThread.isRunning())
+    {
+        // 使用 QueuedConnection 调用 stopWork 来确保在正确的线程中执行
+        QMetaObject::invokeMethod(m_worker, "stopWork", Qt::QueuedConnection);
+
+        // 等待线程优雅地退出
+        if (!m_workerThread.wait(5000))
+        { // 等待最多5秒
+            qWarning() << "工作线程在5秒内没有正常退出，将尝试强制终止。";
+            m_workerThread.terminate();
+            m_workerThread.wait(); // 等待终止完成
+        }
+    }
+
+    m_isServiceRunning = false;
+
+    qInfo() << "================ 服务已停止 ================";
+
+    return ;
 }

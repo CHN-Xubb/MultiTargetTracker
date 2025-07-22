@@ -16,7 +16,8 @@ public:
     explicit Worker(QObject *parent = nullptr);
     ~Worker();
 
-    QDateTime getLastHeartbeat() const;
+signals:
+    void heartbeat(const QDateTime& lastHeartbeat);
 
 public slots:
     void doWork();
@@ -24,7 +25,6 @@ public slots:
 
 private slots:
     void onTimeout();
-    // 添加处理接收到消息的槽函数
     void onMessageReceived(const std::string& message);
 
 private:
@@ -38,7 +38,6 @@ private:
     // 观测数据缓冲区
     std::vector<Measurement> m_measurementBuffer;
     QMutex m_bufferMutex;
-
     QDateTime m_lastHeartbeat;
 };
 

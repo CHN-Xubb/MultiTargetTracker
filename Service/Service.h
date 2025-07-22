@@ -1,28 +1,32 @@
 #ifndef SERVICE_H
 #define SERVICE_H
 
+#include "qtservice.h"
 #include <QObject>
 #include <QThread>
 #include "Worker.h"
 
-
 class HealthCheckServer;
 
-class Service : public QObject
+class Service : public QtService<QCoreApplication>, public QObject
 {
-    Q_OBJECT
 public:
-    explicit Service(QObject *parent = nullptr);
-    ~Service();
+    explicit Service(int argc, char **argv);
+    ~Service() override;
 
-    Worker* getWorker() const;
+    QDateTime getLastWorkerHeartbeat() const;
+
     bool isWorkerThreadRunning() const;
 
 public slots:
-    // 启动服务
-    void start();
-    // 停止服务（优雅退出）
-    void stop();
+    void onWorkerHeartbeat(const QDateTime& lastHeartbeat);
+
+
+protected:
+    void start()override;
+    void stop()override;
+    void pause()override{}
+    void resume()override{}
 
 private:
     void initConfig();
@@ -30,8 +34,14 @@ private:
     void initWorkerThread();
 
     QThread m_workerThread;
+
     Worker* m_worker;
+
     HealthCheckServer* m_healthCheckServer;
+    QDateTime m_lastWorkerHeartbeat;
+    mutable QMutex m_heartbeatMutex;
+
+    bool m_isServiceRunning; // 用于跟踪服务状态
 };
 
 #endif // SERVICE_H

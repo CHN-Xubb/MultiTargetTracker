@@ -5,6 +5,10 @@
 #include <QTextStream>
 #include <iostream> // 用于在 Debug 模式下输出到 stderr
 
+// 定义日志文件轮转的默认配置
+const qint64 DEFAULT_MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
+const int DEFAULT_MAX_FILE_COUNT = 5;                  // 最多 5 个日志文件
+
 LogManager& LogManager::instance() {
     static LogManager instance;
     return instance;

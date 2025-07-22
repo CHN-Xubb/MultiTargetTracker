@@ -1,8 +1,8 @@
 QT       += core network
 TARGET   = MultiTargetTrackerService
 TEMPLATE = app
-
-CONFIG += c++11
+CONFIG += qtservice
+CONFIG += c++14
 CONFIG -= app_bundle
 
 # The following define makes your compiler emit warnings if you use
@@ -16,9 +16,23 @@ DEFINES += QT_DEPRECATED_WARNINGS
 # You can also select to disable deprecated APIs only up to a certain version of Qt.
 #DEFINES += QT_DISABLE_DEPRECATED_BEFORE=0x060000    # disables all the APIs deprecated before Qt 6.0.0
 
+include(External/qtservice/src/qtservice.pri)
+
 msvc{
  QMAKE_CFLAGS += /utf-8
  QMAKE_CXXFLAGS += /utf-8
+}
+
+# 在你的 .pro 文件中添加或修改
+
+# 当CONFIG变量中包含release时 (release模式)
+CONFIG(release, debug|release) {
+    DEFINES += NDEBUG
+    # 上面这行通常是qmake自动添加的，但显式写出来可以保证它一定生效
+}
+# 否则 (debug模式)
+else {
+    DEFINES += DEBUG
 }
 
 
@@ -62,7 +76,6 @@ HEADERS += \
 
 # 平台特定设置
 win32 {
-    # 链接 Windows 服务管理库
-    LIBS += -ladvapi32
+    LIBS += -lShlwapi
     RC_FILE = $$PWD/Res/resources.rc
 }

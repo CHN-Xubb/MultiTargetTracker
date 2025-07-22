@@ -21,14 +21,21 @@ public:
 class ISimulatorData
 {
 public:
+    virtual ~ISimulatorData() = default;
 
-    //×¢²á¶©ÔÄÕß
-    virtual bool registListener(ISimulatorDataListener* pListener)=0;
+    //æ³¨å†Œè®¢é˜…è€…
+    virtual bool registListener(ISimulatorDataListener* pListener) = 0;
 
-    //·¢²¼ĞÅÏ¢
-    virtual bool publishMessage(const SimulatorData& data)=0;
+    //å‘å¸ƒä¿¡æ¯
+    virtual bool publishMessage(const SimulatorData& data) = 0;
+
+    virtual void close() = 0;
 
 };
 
-extern "C" __declspec(dllexport) ISimulatorData* getSimulatorDataInter(int nDomainID,bool allowLose = true);
 
+#ifdef _WIN32
+extern "C" __declspec(dllexport) ISimulatorData* getSimulatorDataInter(int nDomainID,bool allowLose = true);
+#else
+extern "C" ISimulatorData* getSimulatorDataInter(int nDomainID,bool allowLose = true);
+#endif

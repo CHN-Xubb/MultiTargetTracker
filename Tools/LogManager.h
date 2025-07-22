@@ -7,9 +7,7 @@
 #include <QMutex>
 #include <QString>
 
-// 定义日志文件轮转的默认配置
-const qint64 DEFAULT_MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
-const int DEFAULT_MAX_FILE_COUNT = 5;                  // 最多 5 个日志文件
+
 
 class LogManager {
 public:

@@ -36,3 +36,5 @@ inline ISimulatorData *getSimulatorDataInstance(int nDomainId,QString relativePa
     return nullptr;
 #endif
 }
+
+

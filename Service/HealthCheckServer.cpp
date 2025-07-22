@@ -41,18 +41,17 @@ std::string HealthCheckServer::getHealthStatus()
     json details; // 使用 nlohmann::json 对象存储细节
 
     if (m_service) {
-        Worker* worker = m_service->getWorker();
-        if (worker && m_service->isWorkerThreadRunning()) {
+        if (m_service->isWorkerThreadRunning()) {
             // 检查工作线程心跳是否在30秒内
-            qint64 secsSinceLastHeartbeat = worker->getLastHeartbeat().secsTo(QDateTime::currentDateTimeUtc());
+            qint64 secsSinceLastHeartbeat = m_service->getLastWorkerHeartbeat().secsTo(QDateTime::currentDateTimeUtc());
             if (secsSinceLastHeartbeat < 30) {
                 isHealthy = true;
                 details["workerThread"] = "运行中且健康";
-                details["lastHeartbeat"] = worker->getLastHeartbeat().toString(Qt::ISODate).toStdString();
+                details["lastHeartbeat"] = m_service->getLastWorkerHeartbeat().toString(Qt::ISODate).toStdString();
                 details["secsSinceLastHeartbeat"] = secsSinceLastHeartbeat;
             } else {
                 details["workerThread"] = "运行中但卡住 (无心跳)";
-                details["lastHeartbeat"] = worker->getLastHeartbeat().toString(Qt::ISODate).toStdString();
+                details["lastHeartbeat"] = m_service->getLastWorkerHeartbeat().toString(Qt::ISODate).toStdString();
                 details["secsSinceLastHeartbeat"] = secsSinceLastHeartbeat;
             }
         } else {

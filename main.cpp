@@ -1,18 +1,15 @@
-#include <QCoreApplication>
 #include "Service.h"
+//#include <QDebug>
 
-int main(int argc, char *argv[])
+#include <windows.h> // 用于 Windows API
+#include <Shlwapi.h>
+#include <string>    // 用于 C++ 字符串处理
+#include <iostream>  // 用于调试输出
+
+int main(int argc, char **argv)
 {
-    QCoreApplication a(argc, argv);
-    a.setApplicationName("MultiTargetTrackerService");
-    a.setApplicationVersion("1.0");
-
-    // 创建并启动服务
-    Service service;
-    service.start();
-
-    // 启动Qt事件循环
-    return a.exec();
+    Service service(argc, argv);
+    return service.exec();
 }
 
 

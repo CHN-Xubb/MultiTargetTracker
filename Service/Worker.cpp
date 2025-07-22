@@ -27,10 +27,6 @@ Worker::Worker(QObject *parent)
 
 Worker::~Worker() {}
 
-QDateTime Worker::getLastHeartbeat() const
-{
-    return m_lastHeartbeat;
-}
 
 void Worker::doWork()
 {
@@ -188,4 +184,5 @@ void Worker::onTimeout()
     }
 
     m_lastHeartbeat = QDateTime::currentDateTimeUtc();
+    emit heartbeat(m_lastHeartbeat);
 }
