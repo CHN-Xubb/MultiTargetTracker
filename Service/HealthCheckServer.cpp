@@ -46,26 +46,25 @@ std::string HealthCheckServer::getHealthStatus()
             qint64 secsSinceLastHeartbeat = m_service->getLastWorkerHeartbeat().secsTo(QDateTime::currentDateTimeUtc());
             if (secsSinceLastHeartbeat < 30) {
                 isHealthy = true;
-                details["workerThread"] = "运行中且健康";
+                details["workerThread"] = "Running and healthy";
                 details["lastHeartbeat"] = m_service->getLastWorkerHeartbeat().toString(Qt::ISODate).toStdString();
                 details["secsSinceLastHeartbeat"] = secsSinceLastHeartbeat;
             } else {
-                details["workerThread"] = "运行中但卡住 (无心跳)";
+                details["workerThread"] = "Running but stuck (no heartbeat)";
                 details["lastHeartbeat"] = m_service->getLastWorkerHeartbeat().toString(Qt::ISODate).toStdString();
                 details["secsSinceLastHeartbeat"] = secsSinceLastHeartbeat;
             }
         } else {
-            details["workerThread"] = "已停止或不可用";
+            details["workerThread"] = "Stopped or unavailable";
         }
     } else {
-        details["service"] = "不可用";
+        details["service"] = "Unavailable";
     }
 
     status["healthy"] = isHealthy;
     status["details"] = details;
 
     // 使用 dump() 方法将 json 对象序列化为 std::string
-    // nlohmann/json 默认处理 UTF-8，能正确保留中文字符
     return status.dump();
 }
 

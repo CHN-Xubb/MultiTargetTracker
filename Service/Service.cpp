@@ -97,8 +97,10 @@ void Service::initWorkerThread()
     // 当线程启动时，开始执行Worker的doWork
     connect(&m_workerThread, &QThread::started, m_worker, &Worker::doWork);
 
-    // 允许Worker通过调用quit()来停止线程事件循环
-    connect(m_worker, &QObject::destroyed, &m_workerThread, &QThread::quit);
+    // 当线程结束时，清理m_worker
+    connect(&m_workerThread, &QThread::finished, m_worker, &QObject::deleteLater);
+
+
 }
 
 void Service::start()
@@ -167,30 +169,27 @@ void Service::stop()
 {
     qInfo() << "================ 正在停止服务 ================";
 
-    // 停止健康检查服务器
     if (m_healthCheckServer)
     {
         m_healthCheckServer->stopListen();
     }
 
-    // 停止工作线程
+    // 工作线程应自行处理关闭。我们只需请求退出并等待。
     if (m_workerThread.isRunning())
     {
-        // 使用 QueuedConnection 调用 stopWork 来确保在正确的线程中执行
+        // Worker的stopWork()方法应该调用其所在线程事件循环的quit()。
+        // 使用invokeMethod确保该调用在工作线程中被正确地排队和执行。
         QMetaObject::invokeMethod(m_worker, "stopWork", Qt::QueuedConnection);
 
-        // 等待线程优雅地退出
-        if (!m_workerThread.wait(5000))
-        { // 等待最多5秒
-            qWarning() << "工作线程在5秒内没有正常退出，将尝试强制终止。";
-            m_workerThread.terminate();
-            m_workerThread.wait(); // 等待终止完成
+        // 等待线程正常结束。如有必要可以增加超时时间，
+        // 或实现一个更健壮的关闭信号机制。
+        if (!m_workerThread.wait(10000)) // 将超时增加到10秒以提高稳定性
+        {
+            qWarning() << "工作线程在10秒内没有正常退出。";
+            // 记录此错误，并调查关闭过程为何耗时过长。
         }
     }
 
     m_isServiceRunning = false;
-
     qInfo() << "================ 服务已停止 ================";
-
-    return ;
 }
