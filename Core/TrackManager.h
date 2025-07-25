@@ -12,6 +12,7 @@
 #include "DataStructures.h"
 #include "Track.h"
 #include <vector>
+#include <set>
 #include <unordered_map>
 #include <memory>
 #include <QMutex>
@@ -57,18 +58,16 @@ public:
     std::vector<TrackPtr> getTracks() const;
 
 private:
-    /**
-     * @brief 数据关联
-     * @param measurements 观测数据列表
-     * @param matches 成功匹配的航迹ID和观测索引对
-     * @param unmatchedTracks 未匹配的航迹ID列表
-     * @param unmatchedMeasurements 未匹配的观测索引列表
-     * @details 将观测数据关联到已存在的航迹
-     */
-    void dataAssociation(const std::vector<Measurement>& measurements,
-                         std::vector<std::pair<int, int>>& matches,
-                         std::vector<int>& unmatchedTracks,
-                         std::vector<int>& unmatchedMeasurements);
+
+    //    void dataAssociation(const std::vector<Measurement>& measurements,
+    //                         std::vector<std::pair<int, int>>& matches,
+    //                         std::vector<int>& unmatchedTracks,
+    //                         std::vector<int>& unmatchedMeasurements);
+
+    std::set<int> dataAssociation(const std::vector<Measurement>& measurements,
+                                  std::vector<std::pair<int, int>>& matches,
+                                  std::vector<int>& unmatchedTracks,
+                                  std::vector<int>& unmatchedMeasurements);
 
     /**
      * @brief 更新匹配的航迹
@@ -85,8 +84,12 @@ private:
      * @param measurements 观测数据列表
      * @details 为未匹配的观测创建新航迹，包含聚类处理
      */
+    //    void createNewTracks(const std::vector<int>& unmatchedMeasurements,
+    //                         const std::vector<Measurement>& measurements);
+
     void createNewTracks(const std::vector<int>& unmatchedMeasurements,
-                         const std::vector<Measurement>& measurements);
+                         const std::vector<Measurement>& measurements,
+                         const std::set<int>& matchedTrackIds);
 
     /**
      * @brief 管理未匹配的航迹

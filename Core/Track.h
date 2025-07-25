@@ -186,3 +186,4 @@ private:
 using TrackPtr = std::shared_ptr<Track>;
 
 #endif // TRACK_H
+

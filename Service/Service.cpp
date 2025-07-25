@@ -103,11 +103,11 @@ void Service::initConfig()
 
     // 构建配置文件的绝对路径
     QString configPath = QDir(QCoreApplication::applicationDirPath()).filePath("Server.ini");
-    LOG_INFO("配置文件路径: " + configPath);
+    qWarning()<<"配置文件路径: " + configPath;
 
     QSettings settings(configPath, QSettings::IniFormat); // 使用绝对路径
     if (!QFile::exists(configPath)) {
-        LOG_INFO("未找到配置文件，创建默认配置");
+        qWarning("未找到配置文件，创建默认配置");
 
         // 通用配置
         settings.setValue("General/workerInterval", 100);
@@ -120,7 +120,7 @@ void Service::initConfig()
         // 卡尔曼滤波器与航迹管理配置
         settings.beginGroup("KalmanFilter");
         settings.setValue("processNoiseStd", 0.1);
-        settings.setValue("measurementNoiseStd", 2.0);
+        settings.setValue("measurementNoiseStd", 0.1);
         settings.setValue("initialPositionUncertainty", 2.0);
         settings.setValue("initialVelocityUncertainty", 1.0);
         settings.setValue("initialAccelerationUncertainty", 10.0);
@@ -154,8 +154,8 @@ void Service::initLogging()
     LogManager::instance().setLogLevelEnabled(QtDebugMsg, false);
     LogManager::instance().setLogLevelEnabled(QtInfoMsg, false);
 
-    LogManager::instance().setConsoleOutputEnabled(false);
-    LogManager::instance().setFileOutputEnabled(false);
+//    LogManager::instance().setConsoleOutputEnabled(false);
+//    LogManager::instance().setFileOutputEnabled(false);
 
 }
 

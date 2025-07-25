@@ -100,84 +100,63 @@ void Worker::onTimeout()
 
     // 如果有数据，则进行处理
     if (!currentMeasurements.empty()) {
-        // 2. 对本批次的观测数据按时间戳排序
+        // 2. 对本批次的观测数据按时间戳排序，确保时间顺序正确
         std::sort(currentMeasurements.begin(), currentMeasurements.end(),
                   [](const Measurement& a, const Measurement& b) {
             return a.timestamp < b.timestamp;
         });
 
-        // 3. 逐个处理排好序的观测数据
-        for (const auto& meas : currentMeasurements) {
-            // 首先，将所有航迹预测到当前观测数据的时间戳
-            m_trackManager->predictTo(meas.timestamp);
+        // ========================[核心修改部分开始]========================
 
-            // 然后，用这个单独的观测数据去更新航迹
-            m_trackManager->processMeasurements({meas});
-        }
+        // 3. (新) 一次性将所有航迹预测到本批次最新的时间戳
+        // 这是至关重要的第一步。它将所有航迹的状态统一更新到一个共同的时间点，
+        // 为后续的批量数据关联做好了准备。
+        double latestTimestamp = currentMeasurements.back().timestamp;
+        m_trackManager->predictTo(latestTimestamp);
+
+        // 4. (新) 用本周期的所有观测数据，一次性更新所有航迹
+        // 将整个观测数据批次传递给TrackManager。TrackManager内部的数据关联、
+        // 更新、创建和删除逻辑将一次性完成，避免了在Worker层进行高开销的循环。
+        m_trackManager->processMeasurements(currentMeasurements);
+
+        // ========================[核心修改部分结束]========================
     }
 
-    // 4. 定时输出跟踪和预测结果，并将确认航迹打包成JSON发送
+    // 5. 定时输出跟踪和预测结果，并将确认航迹打包成JSON发送
     auto tracks = m_trackManager->getTracks();
 
-    // --- 新增: 准备用于发送的根JSON对象 ---
     json outputJson;
     outputJson["timestamp"] = QDateTime::currentDateTimeUtc().toString(Qt::ISODate).toStdString();
-    outputJson["tracks"] = json::array(); // 创建一个空的JSON数组来存放航迹
-
-    //qInfo() << "================ 周期报告 ================";
-    //qInfo() << "当前活动航迹数:" << tracks.size();
+    outputJson["tracks"] = json::array();
 
     for (const auto& track : tracks) {
         if (track->isConfirmed()) {
             StateVector state = track->getState();
             Vector3 pos = state.head<3>();
-            Vector3 vel = state.tail<3>();
+            Vector3 vel = state.segment<3>(3); // 注意：匀加速模型中，速度在中间3个维度
 
-            // --- 日志打印功能 (保持不变) ---
-            //qDebug().nospace() << "  -> [航迹 ID: " << track->getId() << "] "
-            //                               << "位置:(" << QString::number(pos.x(), 'f', 1) << "," << QString::number(pos.y(), 'f', 1) << "," << QString::number(pos.z(), 'f', 1) << ") "
-            //                               << "速度:(" << QString::number(vel.x(), 'f', 1) << "," << QString::number(vel.y(), 'f', 1) << "," << QString::number(vel.z(), 'f', 1) << ") "
-            //                               << "命中次数:" << track->getHits();
-
-            std::vector<Vector3> future = track->predictFutureTrajectory(2.0, 0.5);
-            QString futurePathStr = "未来路径 (5秒): ";
-            for(const auto& p : future) {
-                futurePathStr += QString("->(%1,%2,%3)").arg(p.x(), 0, 'f', 0).arg(p.y(), 0, 'f', 0).arg(p.z(), 0, 'f', 0);
-            }
-            //qDebug() << "     " << futurePathStr;
-            // --- 日志结束 ---
-
-            // --- 新增: 构建单个航迹的JSON对象 ---
             json trackJson;
             trackJson["id"] = track->getId();
             trackJson["hits"] = track->getHits();
             trackJson["position"] = { {"x", pos.x()}, {"y", pos.y()}, {"z", pos.z()} };
             trackJson["velocity"] = { {"x", vel.x()}, {"y", vel.y()}, {"z", vel.z()} };
 
+            std::vector<Vector3> future = track->predictFutureTrajectory(2.0, 0.5);
             json futurePathJson = json::array();
             for(const auto& p : future) {
                 futurePathJson.push_back({ {"x", p.x()}, {"y", p.y()}, {"z", p.z()} });
             }
             trackJson["future_trajectory"] = futurePathJson;
 
-            // 将当前航迹的JSON对象添加到根对象的数组中
             outputJson["tracks"].push_back(trackJson);
         }
     }
-    //qInfo() << "=============================================";
 
-    // --- 新增: 检查并发送JSON数据 ---
     if (!outputJson["tracks"].empty()) {
         try {
-            // 将JSON对象序列化为字符串
             std::string jsonData = outputJson.dump();
-
-            // 通过全局管理器发送数据
             g_MessageManager.sendMessage(jsonData);
-
             qInfo()<<"outputJson " <<QString::fromStdString(jsonData);
-
-            //qInfo() << "通过 MessageManager 发送了" << outputJson["tracks"].size() << "条已确认航迹。";
         } catch (const json::exception& e) {
             qCritical() << "序列化要发送的航迹JSON失败: " << e.what();
         }

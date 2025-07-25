@@ -13,6 +13,7 @@
 #include <limits>
 #include <set>
 #include <QSettings>
+#include <vector> // 确保包含<vector>
 
 // 定义统一的日志宏
 #define LOG_DEBUG(msg) qDebug() << "[TrackManager::" << __FUNCTION__ << "] " << msg
@@ -24,10 +25,7 @@
 #define LOG_FUNCTION_BEGIN() LOG_DEBUG("开始")
 #define LOG_FUNCTION_END() LOG_DEBUG("结束")
 
-/**
- * @brief 构造函数
- * @details 从配置文件初始化航迹管理器参数
- */
+
 TrackManager::TrackManager()
     : m_nextTrackId(0),
       m_lastProcessTime(0.0),
@@ -36,10 +34,10 @@ TrackManager::TrackManager()
 {
     LOG_FUNCTION_BEGIN();
 
-    // 从配置文件读取参数
     QSettings settings("Server.ini", QSettings::IniFormat);
     m_associationGateDistance = settings.value("KalmanFilter/associationGateDistance", 10.0).toDouble();
     m_newTrackGateDistance = settings.value("KalmanFilter/newTrackGateDistance", 5.0).toDouble();
+
 
     LOG_INFO("初始化完成，关联门限: " + QString::number(m_associationGateDistance) +
              "米，新航迹门限: " + QString::number(m_newTrackGateDistance) + "米");
@@ -47,9 +45,7 @@ TrackManager::TrackManager()
     LOG_FUNCTION_END();
 }
 
-/**
- * @brief 析构函数
- */
+
 TrackManager::~TrackManager()
 {
     LOG_FUNCTION_BEGIN();
@@ -57,11 +53,7 @@ TrackManager::~TrackManager()
     LOG_FUNCTION_END();
 }
 
-/**
- * @brief 处理观测数据
- * @param measurements 观测数据列表
- * @details 主处理函数，执行数据关联、航迹更新和管理
- */
+
 void TrackManager::processMeasurements(const std::vector<Measurement>& measurements)
 {
     QWriteLocker locker(&m_lock);
@@ -77,7 +69,9 @@ void TrackManager::processMeasurements(const std::vector<Measurement>& measureme
     std::vector<std::pair<int, int>> matches;
     std::vector<int> unmatchedTracks;
     std::vector<int> unmatchedMeasurements;
-    dataAssociation(measurements, matches, unmatchedTracks, unmatchedMeasurements);
+    // ========================[核心修改点 1: 获取已匹配航迹ID]========================
+    // dataAssociation现在返回成功匹配的航迹ID集合，供后续使用
+    std::set<int> matched_track_ids = dataAssociation(measurements, matches, unmatchedTracks, unmatchedMeasurements);
 
     // 2. 更新匹配的航迹
     LOG_DEBUG("开始更新 " + QString::number(matches.size()) + " 个匹配的航迹");
@@ -85,14 +79,20 @@ void TrackManager::processMeasurements(const std::vector<Measurement>& measureme
 
     // 3. 为未匹配的观测创建新航迹
     LOG_DEBUG("处理 " + QString::number(unmatchedMeasurements.size()) + " 个未匹配的观测");
-    createNewTracks(unmatchedMeasurements, measurements);
+    // ========================[核心修改点 2: 传递已匹配航迹ID]========================
+    // 将已匹配的航迹ID列表传递给createNewTracks，以防止创建重复航迹
+    createNewTracks(unmatchedMeasurements, measurements, matched_track_ids);
+
 
     // 4. 管理未匹配的航迹
     LOG_DEBUG("管理 " + QString::number(unmatchedTracks.size()) + " 个未匹配的航迹");
     manageUnmatchedTracks(unmatchedTracks);
 
-    // 更新时间戳
-    m_lastProcessTime = measurements.back().timestamp;
+    // 只有在处理完一批数据后才更新时间戳
+    if (!measurements.empty()) {
+        m_lastProcessTime = measurements.back().timestamp;
+    }
+
 
     LOG_DEBUG("处理完成。匹配数: " + QString::number(matches.size()) +
               "，未匹配航迹数: " + QString::number(unmatchedTracks.size()) +
@@ -101,16 +101,11 @@ void TrackManager::processMeasurements(const std::vector<Measurement>& measureme
 }
 
 
-/**
- * @brief 预测所有航迹状态到指定时间
- * @param timestamp 目标时间戳
- * @details 将所有航迹的状态向前预测到指定时间点
- */
+
 void TrackManager::predictTo(double timestamp)
 {
     QWriteLocker locker(&m_lock);
 
-    // 首次调用时初始化时间戳
     if (m_lastProcessTime == 0.0) {
         m_lastProcessTime = timestamp;
         LOG_DEBUG("初始化时间戳: " + QString::number(timestamp));
@@ -119,7 +114,7 @@ void TrackManager::predictTo(double timestamp)
 
     double dt = timestamp - m_lastProcessTime;
     if (dt <= 0) {
-        LOG_DEBUG("时间差为负或零，跳过预测: " + QString::number(dt));
+        //LOG_DEBUG("时间差为负或零，跳过预测: " + QString::number(dt));
         return;
     }
 
@@ -127,21 +122,16 @@ void TrackManager::predictTo(double timestamp)
               " 条航迹到时间戳 " + QString::number(timestamp) +
               "，时间差: " + QString::number(dt) + " 秒");
 
-    // 预测所有航迹
     for (const auto& pair : m_tracks) {
         TrackPtr track = pair.second;
         track->predict(dt);
     }
 }
 
-/**
- * @brief 获取当前所有航迹
- * @return 航迹指针的vector
- * @details 线程安全地获取当前所有活动航迹
- */
+
 std::vector<TrackPtr> TrackManager::getTracks() const
 {
-    QWriteLocker locker(&m_lock);
+    QReadLocker locker(&m_lock);
 
     std::vector<TrackPtr> tracks;
     tracks.reserve(m_tracks.size());
@@ -154,38 +144,31 @@ std::vector<TrackPtr> TrackManager::getTracks() const
     return tracks;
 }
 
-/**
- * @brief 数据关联
- * @param measurements 观测数据列表
- * @param matches 成功匹配的航迹ID和观测索引对
- * @param unmatchedTracks 未匹配的航迹ID列表
- * @param unmatchedMeasurements 未匹配的观测索引列表
- * @details 将观测数据关联到已存在的航迹
- */
-void TrackManager::dataAssociation(const std::vector<Measurement>& measurements,
-                                   std::vector<std::pair<int, int>>& matches,
-                                   std::vector<int>& unmatchedTracks,
-                                   std::vector<int>& unmatchedMeasurements)
+
+// ========================[核心修改点 3: 修改dataAssociation返回值]========================
+std::set<int> TrackManager::dataAssociation(const std::vector<Measurement>& measurements,
+                                            std::vector<std::pair<int, int>>& matches,
+                                            std::vector<int>& unmatchedTracks,
+                                            std::vector<int>& unmatchedMeasurements)
 {
     LOG_FUNCTION_BEGIN();
+    std::set<int> matched_track_ids;
 
-    // 如果没有航迹，所有观测都是未匹配的
     if (m_tracks.empty()) {
         LOG_DEBUG("无现有航迹，所有 " + QString::number(measurements.size()) + " 条观测都标记为未匹配");
         for (size_t i = 0; i < measurements.size(); ++i) {
             unmatchedMeasurements.push_back(i);
         }
         LOG_FUNCTION_END();
-        return;
+        return matched_track_ids;
     }
 
     std::vector<bool> meas_matched(measurements.size(), false);
-    std::set<int> matched_track_ids;
+
 
     LOG_DEBUG("开始关联 " + QString::number(m_tracks.size()) + " 条航迹和 " +
               QString::number(measurements.size()) + " 个观测");
 
-    // 对每个航迹，找到距离最近的观测点
     for (const auto& pair : m_tracks) {
         int trackId = pair.first;
         const TrackPtr& track = pair.second;
@@ -199,8 +182,6 @@ void TrackManager::dataAssociation(const std::vector<Measurement>& measurements,
             if (meas_matched[j]) continue;
 
             double dist = (predicted_pos - measurements[j].position).norm();
-            LOG_DEBUG("检查航迹 " + QString::number(trackId) + " <-> 观测 " +
-                      QString::number(j) + ". 距离: " + QString::number(dist, 'f', 2) + " 米");
 
             if (dist < min_dist) {
                 min_dist = dist;
@@ -208,29 +189,27 @@ void TrackManager::dataAssociation(const std::vector<Measurement>& measurements,
             }
         }
 
-        // 如果最近的观测点在门限内，则认为是成功匹配
         if (best_match_idx != -1 && min_dist < m_associationGateDistance) {
-            matches.push_back({trackId, best_match_idx});
-            meas_matched[best_match_idx] = true;
-            matched_track_ids.insert(trackId);
-            LOG_DEBUG("航迹 " + QString::number(trackId) + " 与观测 " +
-                      QString::number(best_match_idx) + " 匹配成功，距离: " +
-                      QString::number(min_dist, 'f', 2) + " 米");
+            // 防止一个观测被多个航迹匹配，需要再次检查
+            if (!meas_matched[best_match_idx]) {
+                matches.push_back({trackId, best_match_idx});
+                meas_matched[best_match_idx] = true;
+                matched_track_ids.insert(trackId);
+                LOG_DEBUG("航迹 " + QString::number(trackId) + " 与观测 " +
+                          QString::number(best_match_idx) + " 匹配成功，距离: " +
+                          QString::number(min_dist, 'f', 2) + " 米");
+            }
         } else {
-            LOG_DEBUG("航迹 " + QString::number(trackId) + " 无匹配，最近距离 " +
-                      QString::number(min_dist, 'f', 2) + " 米超出门限 " +
-                      QString::number(m_associationGateDistance, 'f', 2) + " 米");
+            // LOG_DEBUG("航迹 " + QString::number(trackId) + " 无匹配");
         }
     }
 
-    // 找出未匹配的航迹
     for (const auto& pair : m_tracks) {
         if (matched_track_ids.find(pair.first) == matched_track_ids.end()) {
             unmatchedTracks.push_back(pair.first);
         }
     }
 
-    // 找出未匹配的观测
     for (size_t i = 0; i < measurements.size(); ++i) {
         if (!meas_matched[i]) {
             unmatchedMeasurements.push_back(i);
@@ -242,14 +221,10 @@ void TrackManager::dataAssociation(const std::vector<Measurement>& measurements,
               "，未匹配观测数: " + QString::number(unmatchedMeasurements.size()));
 
     LOG_FUNCTION_END();
+    return matched_track_ids;
 }
 
-/**
- * @brief 更新匹配的航迹
- * @param matches 成功匹配的航迹ID和观测索引对
- * @param measurements 观测数据列表
- * @details 使用匹配的观测数据更新相应的航迹
- */
+
 void TrackManager::updateMatchedTracks(const std::vector<std::pair<int, int>>& matches,
                                        const std::vector<Measurement>& measurements)
 {
@@ -271,14 +246,13 @@ void TrackManager::updateMatchedTracks(const std::vector<std::pair<int, int>>& m
     LOG_FUNCTION_END();
 }
 
-/**
- * @brief 创建新航迹
- * @param unmatchedMeasurements 未匹配的观测索引列表
- * @param measurements 观测数据列表
- * @details 为未匹配的观测创建新航迹，包含聚类处理
- */
+
+
+
+// ========================[核心修改点 4: 重构createNewTracks逻辑]========================
 void TrackManager::createNewTracks(const std::vector<int>& unmatchedMeasurements,
-                                   const std::vector<Measurement>& measurements)
+                                   const std::vector<Measurement>& measurements,
+                                   const std::set<int>& matchedTrackIds)
 {
     LOG_FUNCTION_BEGIN();
 
@@ -288,42 +262,47 @@ void TrackManager::createNewTracks(const std::vector<int>& unmatchedMeasurements
         return;
     }
 
-    LOG_DEBUG("处理 " + QString::number(unmatchedMeasurements.size()) + " 个未匹配观测");
+    std::vector<int> trulyUnmatchedMeasurements;
+
+    for (int measIdx : unmatchedMeasurements) {
+        const auto& measurement = measurements[measIdx];
+        bool isCloseToExistingTrack = false;
+
+        // 检查这个“未匹配”的观测点是否离任何一个“已匹配”的航迹很近
+        for (int trackId : matchedTrackIds) {
+            if (m_tracks.count(trackId)) {
+                double dist = (m_tracks[trackId]->getState().head<3>() - measurement.position).norm();
+                if (dist < m_newTrackGateDistance) {
+                    isCloseToExistingTrack = true;
+                    LOG_DEBUG("未匹配观测 " + QString::number(measIdx) + " 因距离已更新的航迹 " +
+                              QString::number(trackId) + " 过近 (" + QString::number(dist, 'f', 2) + "米)，被忽略");
+                    break;
+                }
+            }
+        }
+
+        // 如果它不靠近任何已存在的航迹，才认为它可能是一个新目标
+        if (!isCloseToExistingTrack) {
+            trulyUnmatchedMeasurements.push_back(measIdx);
+        }
+    }
+
+    if (trulyUnmatchedMeasurements.empty()) {
+        LOG_DEBUG("所有未匹配观测都因靠近现有航迹而被忽略，无新航迹创建");
+        LOG_FUNCTION_END();
+        return;
+    }
+
+    LOG_DEBUG("处理 " + QString::number(trulyUnmatchedMeasurements.size()) + " 个真正未匹配的观测");
     std::vector<bool> meas_processed(measurements.size(), false);
     int newTracksCreated = 0;
 
-    // 处理每个未匹配的观测
-    for (int i = 0; i < unmatchedMeasurements.size(); ++i) {
-        int idx1 = unmatchedMeasurements[i];
+    for (int idx1 : trulyUnmatchedMeasurements) {
         if (meas_processed[idx1]) {
-            LOG_DEBUG("观测 " + QString::number(idx1) + " 已处理，跳过");
             continue;
         }
 
-        // 默认将当前观测点作为新航迹的核心
-        std::vector<int> cluster;
-        cluster.push_back(idx1);
-        meas_processed[idx1] = true;
-
-        // 检查其他未匹配的观测点是否与它足够近（聚类处理）
-        for (int j = i + 1; j < unmatchedMeasurements.size(); ++j) {
-            int idx2 = unmatchedMeasurements[j];
-            if (meas_processed[idx2]) {
-                continue;
-            }
-
-            double dist = (measurements[idx1].position - measurements[idx2].position).norm();
-            if (dist < m_newTrackGateDistance) {
-                // 如果距离很近，认为是同一目标的多次上报，归为一类
-                meas_processed[idx2] = true;
-                LOG_DEBUG("观测 " + QString::number(idx2) + " 与观测 " +
-                          QString::number(idx1) + " 距离仅 " + QString::number(dist, 'f', 2) +
-                          " 米，低于门限 " + QString::number(m_newTrackGateDistance, 'f', 2) +
-                          " 米，已聚类并跳过单独创建");
-            }
-        }
-
-        // 只为这个"聚类"的第一个观测点创建航迹
+        // 为这个真正无归属的观测点创建新航迹
         auto model = std::make_unique<ConstantAccelerationModel>();
         TrackPtr newTrack = std::make_shared<Track>(measurements[idx1], m_nextTrackId++, std::move(model));
 
@@ -334,17 +313,25 @@ void TrackManager::createNewTracks(const std::vector<int>& unmatchedMeasurements
                  "，位置: (" + QString::number(measurements[idx1].position.x(), 'f', 2) +
                  ", " + QString::number(measurements[idx1].position.y(), 'f', 2) +
                  ", " + QString::number(measurements[idx1].position.z(), 'f', 2) + ")");
+
+        // (可选) 仍然可以保留内部聚类，以处理来自同一新目标的密集点云
+        for (int idx2 : trulyUnmatchedMeasurements) {
+            if (idx1 == idx2 || meas_processed[idx2]) continue;
+            double dist = (measurements[idx1].position - measurements[idx2].position).norm();
+            if (dist < m_newTrackGateDistance) {
+                meas_processed[idx2] = true;
+                LOG_DEBUG("观测 " + QString::number(idx2) + " 与新航迹 " +
+                          QString::number(newTrack->getId()) + " 的初始点 " + QString::number(idx1) +
+                          " 聚类，不再单独创建航迹");
+            }
+        }
     }
 
     LOG_DEBUG("共创建 " + QString::number(newTracksCreated) + " 条新航迹");
     LOG_FUNCTION_END();
 }
 
-/**
- * @brief 管理未匹配的航迹
- * @param unmatchedTracks 未匹配的航迹ID列表
- * @details 增加未匹配航迹的丢失计数，删除丢失过久的航迹
- */
+
 void TrackManager::manageUnmatchedTracks(const std::vector<int>& unmatchedTracks)
 {
     LOG_FUNCTION_BEGIN();
@@ -370,3 +357,6 @@ void TrackManager::manageUnmatchedTracks(const std::vector<int>& unmatchedTracks
     LOG_DEBUG("共删除 " + QString::number(deletedCount) + " 条丢失航迹");
     LOG_FUNCTION_END();
 }
+
+
+
