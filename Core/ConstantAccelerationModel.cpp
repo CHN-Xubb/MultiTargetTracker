@@ -10,7 +10,7 @@ ConstantAccelerationModel::ConstantAccelerationModel()
     // 从配置文件加载CA模型特定的过程噪声标准差
     QSettings settings("Server.ini", QSettings::IniFormat);
     // 我们为CA模型使用一个新的配置项
-    m_process_noise_std = settings.value("KalmanFilter/processNoiseStd_CA", 1.0).toDouble();
+    m_process_noise_std = settings.value("KalmanFilter/processNoiseStd", 1.0).toDouble();
 }
 
 int ConstantAccelerationModel::stateDim() const { return m_stateDim; }
@@ -88,7 +88,6 @@ Eigen::MatrixXd ConstantAccelerationModel::getInitialCovariance() const
     QSettings settings("Server.ini", QSettings::IniFormat);
     double pos_uncertainty = settings.value("KalmanFilter/initialPositionUncertainty", 10.0).toDouble();
     double vel_uncertainty = settings.value("KalmanFilter/initialVelocityUncertainty", 100.0).toDouble();
-    // 为CA模型增加初始加速度不确定性的配置
     double acc_uncertainty = settings.value("KalmanFilter/initialAccelerationUncertainty", 10.0).toDouble();
 
     Eigen::MatrixXd P = Eigen::MatrixXd::Identity(m_stateDim, m_stateDim);

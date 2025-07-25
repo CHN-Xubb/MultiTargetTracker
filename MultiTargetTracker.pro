@@ -1,4 +1,4 @@
-QT       += core network
+QT       += core network concurrent
 TARGET   = MultiTargetTrackerService
 TEMPLATE = app
 CONFIG += qtservice
@@ -23,7 +23,6 @@ msvc{
  QMAKE_CXXFLAGS += /utf-8
 }
 
-# 在你的 .pro 文件中添加或修改
 
 # 当CONFIG变量中包含release时 (release模式)
 CONFIG(release, debug|release) {
@@ -47,6 +46,7 @@ INCLUDEPATH += $$PWD/Tools
 DESTDIR += $$PWD/binr
 
 SOURCES += main.cpp \
+    Core/SRCKF.cpp \
     Tools/LogManager.cpp \
     Service/MessageRelayManager.cpp \
     Service/Service.cpp \
@@ -61,6 +61,7 @@ SOURCES += main.cpp \
 
 
 HEADERS += \
+    Core/SRCKF.h \
     Tools/LogManager.h \
     Service/MessageRelayManager.h \
     Service/Service.h \
@@ -74,8 +75,6 @@ HEADERS += \
     Service/HealthCheckServer.h \
     Core/ConstantAccelerationModel.h
 
-# 平台特定设置
 win32 {
-    LIBS += -lShlwapi
     RC_FILE = $$PWD/Res/resources.rc
 }

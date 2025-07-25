@@ -16,7 +16,6 @@ int ConstantVelocityModel::measurementDim() const { return m_measurementDim; }
 StateVector ConstantVelocityModel::predict(const StateVector& x, double dt) const
 {
     StateVector new_x = x;
-    // position = old_position + velocity * dt
     new_x.head<3>() += x.tail<3>() * dt;
     return new_x;
 }
